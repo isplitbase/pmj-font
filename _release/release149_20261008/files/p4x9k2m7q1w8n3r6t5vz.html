@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+  <meta http-equiv="x-ua-compatible" content="ie=edge">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Cache-Control" content="no-cache">
+  <title>画像補正・再分析</title>
+  <!--
+    画像補正・再分析ポップアップ(zaiTask 編集画面の「openai画像処理」から開く)
+      index.php の /?aitask_hosei からこのファイルを読み込む。
+      画面の処理は ikisaki_tool/js/pmjtools2.js(CS.aitask_hosei_*)。
+      開始は mdb_js/ikisaki_init.js の URL 判定から CS.aitask_hosei_start() を呼ぶ。
+  -->
+  <link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.6.3/css/all.css">
+  <link href="./mdb_css/bootstrap.min.css" rel="stylesheet">
+  <link href="./mdb_css/mdb.css" rel="stylesheet">
+  <link href="./mdb_css/style.css" rel="stylesheet">
+  <link rel='shortcut icon' type='image/x-icon' href='mdb_img/favicon1.ico' />
+  <link href="css/ikisaki.css" rel="stylesheet">
+  <link href="css/style.css" rel="stylesheet">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+  <style>
+    [v-cloak] { display: none; }
+    body { background: #f3f4f7; font-family: "Noto Sans JP", sans-serif; font-size: 13px; }
+    #hoseiApp { padding: 0 0 40px; }
+    .hs-bar { position: sticky; top: 0; z-index: 50; background: #fff; border-bottom: 1px solid #dde;
+              padding: 10px 16px; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+    .hs-bar .hs-title { font-weight: 700; font-size: 15px; margin-right: 12px; }
+    .hs-bar .hs-info { color: #666; margin-left: 4px; }
+    .hs-bar .btn { margin: 0; padding: 6px 18px; font-size: 13px; }
+    .hs-body { padding: 14px 16px; }
+    .hs-note { color: #8a6d00; background: #fff8e1; border: 1px solid #f3e0a0; border-radius: 4px;
+               padding: 8px 12px; margin-bottom: 12px; line-height: 1.7; }
+    .hs-pages { display: flex; flex-wrap: wrap; gap: 10px; }
+    .hs-page { width: 128px; background: #fff; border: 2px solid #dde; border-radius: 6px; padding: 6px;
+               cursor: pointer; text-align: center; user-select: none; }
+    .hs-page.on { border-color: #2962FF; background: #eef3ff; }
+    .hs-page img { width: 100%; height: 160px; object-fit: contain; background: #fafafa; display: block; }
+    .hs-page .hs-no { margin-top: 4px; font-weight: 700; }
+    .hs-blk { background: #fff; border: 1px solid #dde; border-radius: 6px; margin-bottom: 16px; overflow: hidden; }
+    .hs-blk-head { padding: 8px 12px; background: #f7f8fb; border-bottom: 1px solid #e5e7ee;
+                   display: flex; align-items: center; flex-wrap: wrap; gap: 14px; }
+    .hs-blk-head .hs-pno { font-weight: 700; }
+    .hs-blk-head label { margin: 0; cursor: pointer; }
+    .hs-pair { display: flex; gap: 8px; padding: 8px; }
+    .hs-col { flex: 1; min-width: 0; }
+    .hs-col .hs-cap { color: #777; font-size: 12px; padding: 2px 0 4px; }
+    .hs-col img { width: 100%; display: block; background: #fff; border: 1px solid #eee; }
+    .hs-col .hs-wait { padding: 60px 0; text-align: center; color: #888; }
+    .hs-col .hs-err { padding: 30px 10px; color: #c62828; }
+    /* MDB(mdb.css)は素のラジオボタン・チェックボックスを隠すので、このページの中だけ表示に戻す */
+    #hoseiApp input[type=radio], #hoseiApp input[type=checkbox] {
+      position: static !important; opacity: 1 !important; pointer-events: auto !important;
+      left: auto !important; visibility: visible !important;
+      width: 15px; height: 15px; margin: 0 4px 0 0; vertical-align: middle; cursor: pointer;
+    }
+    .hs-blk-head label { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 4px; }
+    .hs-blk-head label.on { background: #2962FF; color: #fff; }
+    .hs-unused { opacity: 0.55; }
+    .hs-unused .hs-pair { max-height: 260px; overflow: hidden; }
+    .hs-stack .hs-pair { display: block; }
+    .hs-stack .hs-col { margin-bottom: 10px; }
+    .hs-center { padding: 80px 0; text-align: center; color: #555; font-size: 15px; line-height: 2; }
+    .hs-table { width: 100%; background: #fff; border-collapse: collapse; }
+    .hs-table th { background: #f0f2f7; position: sticky; top: 52px; z-index: 5;
+                   font-size: 12px; white-space: nowrap; }
+    /* 分析・反映するタブの選択(比較画面) */
+    .hs-tabsel { position: sticky; top: 55px; z-index: 40; background: #fff; border-bottom: 1px solid #dde;
+                 padding: 6px 16px; display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+    .hs-tabsel-label { font-weight: 700; font-size: 13px; margin-right: 4px; }
+    .hs-tabsel .hs-vbtn { font-size: 13px; padding: 3px 12px; }
+    .hs-tabsel .hs-vbtn.on .hs-small { color: #e3e9ff; }
+    /* 補正のプロンプト(歯車) */
+    .hs-gear { border: 1px solid #ccd; background: #fff; border-radius: 50%; width: 34px; height: 34px;
+               cursor: pointer; color: #555; font-size: 16px; padding: 0; }
+    .hs-gear:hover { color: #2962FF; border-color: #2962FF; }
+    .hs-gear.on { background: #2962FF; color: #fff; border-color: #2962FF; }
+    .hs-badge { background: #fff3cd; color: #8a6d00; border: 1px solid #f3e0a0; border-radius: 10px;
+                padding: 1px 10px; font-size: 12px; cursor: pointer; }
+    .hs-modal-bg { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.4);
+                   z-index: 1000; display: flex; align-items: center; justify-content: center; }
+    .hs-modal { background: #fff; border-radius: 8px; padding: 16px 18px; width: min(640px, 92vw);
+                box-shadow: 0 4px 20px rgba(0,0,0,0.3); }
+    .hs-modal-title { font-weight: 700; margin-bottom: 8px; }
+    .hs-modal textarea { width: 100%; font-size: 13px; padding: 8px; border: 1px solid #ccd; border-radius: 4px; resize: vertical; }
+    .hs-modal-foot { display: flex; align-items: center; gap: 6px; margin-top: 8px; }
+    .hs-modal-foot .btn { margin: 0; }
+    /* 結果画面: 左に表、右に画像 */
+    .hs-split { display: flex; gap: 12px; align-items: flex-start; }
+    .hs-split-left { flex: 1 1 56%; min-width: 0; }
+    /* 狭いウィンドウでも表が右の画像にはみ出さないよう、列の幅を表の幅の中に収める */
+    .hs-split-left .hs-table { table-layout: fixed; }
+    .hs-viewer { flex: 0 0 42%; position: sticky; top: 62px; height: calc(100vh - 76px);
+                 display: flex; flex-direction: column; background: #fff; border: 1px solid #dde; border-radius: 6px; }
+    .hs-viewer-head { padding: 6px 8px; border-bottom: 1px solid #e5e7ee; background: #f7f8fb; }
+    .hs-viewer-row { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; margin: 2px 0; }
+    .hs-vbtn { border: 1px solid #ccd; background: #fff; border-radius: 4px; padding: 2px 10px; font-size: 12px; cursor: pointer; }
+    .hs-vbtn.on { background: #2962FF; color: #fff; border-color: #2962FF; }
+    .hs-vbtn:disabled { opacity: 0.4; cursor: default; }
+    .hs-viewer-body { flex: 1; overflow: auto; padding: 6px; background: #eceef3; }
+    .hs-imgwrap { position: relative; }
+    .hs-imgwrap img { width: 100%; display: block; background: #fff; }
+    .hs-box { position: absolute; border: 2px solid #e53935; background: rgba(229, 57, 53, 0.12); pointer-events: none; }
+    .hs-table tr.hs-selected td { background: #e8f0fe; }
+    /* 行のドラッグ移動 */
+    .hs-grip { cursor: grab; color: #9aa0ac; padding: 0 6px 0 2px; }
+    .hs-grip:hover { color: #2962FF; }
+    .hs-table tr.hs-dragging td { opacity: 0.4; }
+    .hs-table tr.hs-drop-before td { box-shadow: inset 0 3px 0 #2962FF; }
+    .hs-table tr.hs-drop-after td { box-shadow: inset 0 -3px 0 #2962FF; }
+    .hs-table th, .hs-table td { border: 1px solid #e1e4ea; padding: 4px 6px; vertical-align: middle; }
+    .hs-table td.num input { text-align: right; }
+    .hs-table input[type=text], .hs-table select { width: 100%; font-size: 13px; padding: 2px 4px;
+                   border: 1px solid #ccd; border-radius: 3px; background: #fff; }
+    .hs-table tr.off td { background: #f4f4f4; color: #aaa; }
+    .hs-table .hs-small { font-size: 11px; color: #888; }
+    .hs-warn { color: #c62828; }
+    .hs-table td.hs-ops { text-align: center; white-space: nowrap; }
+    .hs-table td.hs-ops i { cursor: pointer; padding: 2px 4px; font-size: 15px; color: #444; }
+    .hs-table td.hs-ops i:hover { color: #2962FF; }
+    .hs-table tr.hs-move td { background: #ffe4ec; }
+  </style>
+</head>
+<body>
+  <!-- 共通の初期化(ikisaki_init.js)が #vueObj に Vue を作るので、空の入れ物だけ置く -->
+  <div id="vueObj" style="display:none"></div>
+
+  <div id="hoseiApp" v-cloak>
+
+    <!-- ===== 補正のプロンプト(歯車) ===== -->
+    <div class="hs-modal-bg" v-if="promptOpen" v-on:click.self="closePrompt">
+      <div class="hs-modal">
+        <div class="hs-modal-title"><i class="fas fa-cog"></i> 補正のプロンプト（このウィンドウを閉じるまで有効）</div>
+        <textarea v-model="promptDraft" maxlength="300" rows="8"
+                  placeholder="空欄のときは既定のプロンプトを使います（例: この画像の傾きを直して、文字を読みやすくしてください。数字は変えないでください。）"></textarea>
+        <div class="hs-modal-foot">
+          <span v-bind:class="{'hs-warn': promptDraftLen > 300}">{{promptDraftLen}} / 300 文字</span>
+          <span style="flex:1;"></span>
+          <button type="button" class="btn btn-light btn-sm" v-on:click="promptDraft=''">空にする（既定に戻す）</button>
+          <button type="button" class="btn btn-light btn-sm" v-on:click="closePrompt">キャンセル</button>
+          <button type="button" class="btn btn-primary btn-sm" v-on:click="savePrompt" v-bind:disabled="promptDraftLen > 300">この内容で使う</button>
+        </div>
+        <div class="hs-small" style="margin-top:6px;">
+          保存はしません。このウィンドウを閉じると元に戻ります。次の「補正開始」から使われます。
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== 1. ページ選択 ===== -->
+    <template v-if="step=='select'">
+      <div class="hs-bar">
+        <span class="hs-title">画像補正・再分析</span>
+        <button type="button" class="btn btn-primary" v-on:click="startHosei" v-bind:disabled="selectedCount==0">補正開始</button>
+        <button type="button" class="btn btn-light" v-on:click="skipHosei" v-bind:disabled="selectedCount==0">補正しないで分析へ</button>
+        <button type="button" class="btn btn-light" v-on:click="closeWindow">閉じる</button>
+        <button type="button" class="hs-gear" v-bind:class="{on: customPrompt}" title="補正のプロンプトを指定する" v-on:click="openPrompt">
+          <i class="fas fa-cog"></i>
+        </button>
+        <span class="hs-badge" v-if="customPrompt" v-on:click="openPrompt" title="クリックで確認・変更">プロンプト指定中</span>
+        <span class="hs-info">反映先: {{tabName}} ／ {{selectedCount}} ページ選択中</span>
+      </div>
+      <div class="hs-body">
+        <div class="hs-note">
+          補正するページを選んでください（初期値は今表示しているページです）。<br>
+          「補正開始」で選んだページを1枚ずつ OpenAI で補正し、元の画像と並べて表示します。画像はサーバに保存しません。<br>
+          次の画面には全ページが出るので、補正しないページも「元画像」として一緒に分析に送れます。
+        </div>
+        <div style="margin-bottom:10px;">
+          <button type="button" class="btn btn-sm btn-light" v-on:click="checkAll(true)">全選択</button>
+          <button type="button" class="btn btn-sm btn-light" v-on:click="checkAll(false)">全解除</button>
+          <button type="button" class="btn btn-sm btn-light" v-on:click="checkNow">今のページだけ</button>
+        </div>
+        <div class="hs-pages">
+          <div v-for="(p, i) in pages" v-bind:key="i" class="hs-page" v-bind:class="{on: p.checked}" v-on:click="p.checked=!p.checked">
+            <img v-bind:src="p.orig">
+            <div class="hs-no"><input type="checkbox" v-model="p.checked" v-on:click.stop> {{i+1}} ページ</div>
+          </div>
+        </div>
+      </div>
+    </template>
+
+    <!-- ===== 2. 補正・比較 ===== -->
+    <template v-if="step=='compare'">
+      <div class="hs-bar">
+        <span class="hs-title">補正結果の確認</span>
+        <button type="button" class="btn btn-primary" v-on:click="startAnalyze" v-bind:disabled="busy">分析開始</button>
+        <button type="button" class="btn btn-light" v-on:click="backToSelect" v-bind:disabled="busy">ページ選択に戻る</button>
+        <button type="button" class="btn btn-light" v-on:click="closeWindow">閉じる</button>
+        <span class="hs-info">{{progressText}}</span>
+        <span class="hs-badge" v-if="usedPrompt" v-bind:title="usedPrompt">指定したプロンプトで補正</span>
+        <label style="margin:0 0 0 10px;cursor:pointer;color:#666;"><input type="checkbox" v-model="stack"> 大きく見る（上下に並べる）</label>
+      </div>
+      <!-- どのタブとして分析・反映するか(初期値は親画面で開いているタブ) -->
+      <div class="hs-tabsel">
+        <span class="hs-tabsel-label">分析・反映するタブ:</span>
+        <button type="button" v-for="k in [1,2,3,4]" class="hs-vbtn" v-bind:class="{on: tabIndex===k}"
+                v-on:click="tabIndex=k">{{tabNames[k]}}<span v-if="k===parentTab" class="hs-small">（親画面で表示中）</span></button>
+        <span class="hs-small hs-warn" v-if="tabIndex!==parentTab">
+          ※ 反映するときに、親画面のタブも「{{tabName}}」に切り替わります
+        </span>
+      </div>
+      <div class="hs-body" v-bind:class="{'hs-stack': stack}">
+        <div class="hs-note">
+          ※ 補正後の画像は AI が作り直したものです。金額や文字が元と変わっている場合があります。<br>
+          全ページを表示しています。ページごとに、分析に使う画像（使わない／元画像／補正後）を選んでから「分析開始」を押してください。<br>
+          補正していないページも「元画像」を選べば、補正したページと一緒に分析に送れます。
+        </div>
+        <div v-for="t in targets" v-bind:key="t.index" class="hs-blk" v-bind:class="{'hs-unused': t.source=='none'}">
+          <div class="hs-blk-head">
+            <span class="hs-pno">{{t.index+1}} ページ</span>
+            <span>分析に使う画像:</span>
+            <label v-bind:class="{on: t.source=='none'}"><input type="radio" value="none" v-model="t.source"> 使わない</label>
+            <label v-bind:class="{on: t.source=='orig'}"><input type="radio" value="orig" v-model="t.source"> 元画像</label>
+            <label v-bind:class="{on: t.source=='hosei'}" v-bind:style="{opacity: t.hosei ? 1 : 0.4}"><input type="radio" value="hosei" v-model="t.source" v-bind:disabled="!t.hosei"> 補正後</label>
+            <span class="hs-small" v-if="t.info">{{t.info}}</span>
+          </div>
+          <div class="hs-pair">
+            <div class="hs-col"><div class="hs-cap">処理前（元画像）</div><img v-bind:src="t.orig"></div>
+            <div class="hs-col">
+              <div class="hs-cap">処理後（補正）</div>
+              <img v-if="t.hosei" v-bind:src="t.hosei">
+              <div v-else-if="t.state=='error'" class="hs-err">補正に失敗しました。<br>{{t.error}}</div>
+              <div v-else-if="t.state=='run'" class="hs-wait"><i class="fas fa-spinner fa-spin"></i> 補正しています…</div>
+              <div v-else-if="t.state=='wait'" class="hs-wait">順番待ち</div>
+              <div v-else class="hs-wait">補正していません</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </template>
+
+    <!-- ===== 3. 分析中 ===== -->
+    <template v-if="step=='analyze'">
+      <div class="hs-bar"><span class="hs-title">分析中</span></div>
+      <div class="hs-center">
+        <i class="fas fa-spinner fa-spin" style="font-size:32px;color:#2962FF;"></i><br>
+        {{usedCount}} ページを分析しています…<br>
+        <span style="font-size:13px;color:#888;">1ページあたり30秒ほどかかります。このウィンドウは閉じないでください。</span>
+      </div>
+    </template>
+
+    <!-- ===== 4. 分析結果(1つの表にまとめる) ===== -->
+    <template v-if="step=='result'">
+      <div class="hs-bar">
+        <span class="hs-title">分析結果（{{tabName}}）</span>
+        <button type="button" class="btn btn-primary" v-on:click="applyResult" v-bind:disabled="rows.length==0">結果反映</button>
+        <button type="button" class="btn btn-light" v-on:click="backToCompare">比較に戻る</button>
+        <button type="button" class="btn btn-light" v-on:click="closeWindow">閉じる</button>
+        <button type="button" class="btn btn-light" v-on:click="viewerOpen=!viewerOpen">
+          <i class="fas" v-bind:class="viewerOpen ? 'fa-eye-slash' : 'fa-image'"></i> {{viewerOpen ? '画像を隠す' : '画像を表示'}}
+        </button>
+        <span class="hs-info">{{resultInfo}}</span>
+      </div>
+      <div class="hs-body hs-split">
+       <!-- 左: 結果の表 -->
+       <div class="hs-split-left">
+        <div class="hs-note">
+          「結果反映」を押すと、親画面の「{{tabName}}」の行を、この表の行で<b>置き換えます</b>。
+          親画面で保存するまでは DB には書き込まれません。<br>
+          勘定科目キーワードを書き換えると、勘定科目の候補を探し直します（空にすると全科目）。<br>
+          行をクリックすると、右の画像でその行を読み取った場所を枠で囲みます。
+        </div>
+        <div v-if="rows.length==0" class="hs-center">このタブ（{{tabName}}）に当てはまる行が見つかりませんでした。<br>選んだページや反映先のタブを確認してください。</div>
+        <!-- 手動分析のステップD(法人)と同じ列 -->
+        <table v-else class="hs-table">
+          <thead>
+            <tr>
+              <th style="width:54px;">ページ</th>
+              <th style="width:17%;">勘定科目キーワード</th>
+              <th>勘定科目</th>
+              <th style="width:11%;">前期金額</th>
+              <th style="width:12%;">今期金額</th>
+              <th style="width:46px;">追加</th>
+              <th style="width:36px;">削除</th>
+              <th style="width:42px;">移動</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="(r, i) in rows" v-bind:key="r.uid"
+                v-on:click="selectRow(i)"
+                v-bind:class="{'hs-move': moveTarget===i, 'hs-dragging': dragIndex===i, 'hs-selected': r.uid===selUid,
+                               'hs-drop-before': dragOverIndex===i && dragPos=='before',
+                               'hs-drop-after': dragOverIndex===i && dragPos=='after'}"
+                v-bind:draggable="dragReady ? 'true' : 'false'"
+                v-on:dragstart="onDragStart(i, $event)" v-on:dragover.prevent="onDragOver(i, $event)"
+                v-on:drop.prevent="onDrop(i)" v-on:dragend="onDragEnd">
+              <td style="text-align:center;white-space:nowrap;">
+                <i class="fas fa-grip-vertical hs-grip" title="ドラッグして上下に移動"
+                   v-on:mousedown="dragReady=true" v-on:mouseup="dragReady=false"></i>{{r.page >= 0 ? r.page+1 : '-'}}
+              </td>
+              <td><input type="text" v-model="r.keyword" v-on:change="keywordChange(i)"></td>
+              <td>
+                <select v-model="r.index" class="browser-default custom-select" style="font-size:12px;height:auto;padding:2px 24px 2px 4px;">
+                  <option v-for="(o, j) in r.list" v-bind:value="j">{{optionLabel(o)}}</option>
+                </select>
+                <div class="hs-small hs-warn" v-if="r.list.length==0">候補がありません。キーワードを変えてください</div>
+              </td>
+              <td class="num"><input type="text" v-model="r.zenki" v-on:change="kingakuChange(i,'zenki')"></td>
+              <td class="num"><input type="text" v-model="r.konki" v-on:change="kingakuChange(i,'konki')"></td>
+              <td class="hs-ops">
+                <i class="fas fa-caret-up" title="上に行を追加" v-on:click="addUp(i)"></i>
+                <i class="fas fa-caret-down" title="下に行を追加" v-on:click="addDown(i)"></i>
+              </td>
+              <td class="hs-ops"><i class="fas fa-trash" title="削除" v-on:click="deleteRow(i)"></i></td>
+              <td class="hs-ops">
+                <i v-if="moveTarget===null" class="fas fa-caret-right" title="この行を動かす" v-on:click="getTarget(i)"></i>
+                <template v-else>
+                  <i class="fas fa-caret-up" title="この行の上へ" v-on:click="setTarget(i,'up')"></i>
+                  <i class="fas fa-caret-down" title="この行の下へ" v-on:click="setTarget(i,'dw')"></i>
+                </template>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+       </div>
+
+       <!-- 右: 画像(表をスクロールしても止まっている) -->
+       <div class="hs-viewer" v-if="viewerOpen && sentPages.length>0">
+         <div class="hs-viewer-head">
+           <div class="hs-viewer-row">
+             <span class="hs-small">ページ:</span>
+             <button type="button" v-for="(p, k) in sentPages" class="hs-vbtn" v-bind:class="{on: viewerPos===k}"
+                     v-on:click="viewerPos=k">{{p.no}}</button>
+             <span class="hs-small" style="margin-left:10px;">表示:</span>
+             <button type="button" class="hs-vbtn" v-bind:class="{on: viewerSrc=='orig'}" v-on:click="viewerSrc='orig'">元画像</button>
+             <button type="button" class="hs-vbtn" v-bind:class="{on: viewerSrc=='hosei'}" v-bind:disabled="!viewerPage.hosei"
+                     v-on:click="viewerSrc='hosei'">補正後</button>
+           </div>
+           <div class="hs-viewer-row">
+             <button type="button" class="hs-vbtn" title="縮小" v-on:click="zoomBy(-25)"><i class="fas fa-search-minus"></i></button>
+             <span class="hs-small" style="min-width:42px;text-align:center;">{{zoom}}%</span>
+             <button type="button" class="hs-vbtn" title="拡大" v-on:click="zoomBy(25)"><i class="fas fa-search-plus"></i></button>
+             <button type="button" class="hs-vbtn" title="幅に合わせる" v-on:click="zoom=100">幅に合わせる</button>
+             <span class="hs-small" style="margin-left:8px;">分析に使った画像: {{viewerPage.used=='hosei' ? '補正後' : '元画像'}}</span>
+           </div>
+           <div class="hs-small hs-warn" v-if="boxStyle && viewerPage.used=='hosei' && viewerSrc=='orig'">
+             ※ 補正後の画像を分析したため、元画像の枠は目安です（位置が少しずれることがあります）
+           </div>
+         </div>
+         <div class="hs-viewer-body" ref="viewerBody">
+           <div class="hs-imgwrap" v-bind:style="{width: zoom + '%'}">
+             <img v-bind:src="viewerImage">
+             <div class="hs-box" ref="box" v-if="boxStyle" v-bind:style="boxStyle"></div>
+           </div>
+         </div>
+       </div>
+      </div>
+    </template>
+
+  </div>
+
+  <!-- SCRIPTS(既存の結果ウィンドウ b07i5lo23pvao2tm8gwq2.html と同じもの) -->
+  <script type="text/javascript" src="./mdb_js/jquery-3.3.1.min.js"></script>
+  <script type="text/javascript" src="./js/jquery-ui-1.12.1/jquery-ui.js"></script>
+  <script type="text/javascript" src="./js/jquery.csv.js"></script>
+  <script type="text/javascript" src="./js/encoding.min.js"></script>
+  <script type="text/javascript" src="./mdb_js/popper.min.js"></script>
+  <script type="text/javascript" src="./mdb_js/bootstrap.min.js"></script>
+  <script type="text/javascript" src="./mdb_js/mdb.js"></script>
+  <script type="text/javascript" src="./mdb_js/mdb.min.js"></script>
+  <script type="text/javascript" src="./chart.js-2.8.0/package/dist/Chart.min.js"></script>
+  <script type="text/javascript" src="https://cdn.jsdelivr.net/npm/vue@2.6.0"></script>
+  <script type="text/javascript" src="mdb_js/common.js"></script>
+  <script type="text/javascript" src="mdb_js/ikisaki_init.js"></script>
+  <script type="text/javascript" src="./js/jquery.cookie.js?page=1"></script>
+</body>
+</html>
