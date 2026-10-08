@@ -46,6 +46,8 @@ function itask_image_hosei(){
 	// 時間のかかる処理なので、先にセッションロックを解放しておく
 	// (これをしないと補正中に同じブラウザの他の操作が全部止まる)
 	keieidangi_release_session();
+	// 149 は php.ini の max_execution_time が 30 秒なので、ここで上限を外す(再分析の .do と同じ)
+	@set_time_limit(0);
 
 	$putmobj = array();
 
