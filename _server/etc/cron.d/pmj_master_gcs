@@ -1,0 +1,6 @@
+# マスタ(v2ac_kanjo_master.json)を GCS へ転送する (10分ごと)
+#   30分以内に更新され、前回送った中身と違うときだけ pmj-door(-real) → pmj-simpletool(-real) へ送る
+#   詳細は /data/pmj_cron/master_to_gcs.php の先頭
+SHELL=/bin/bash
+PATH=/usr/local/bin:/usr/bin:/bin
+*/10 * * * * ec2-user php /data/pmj_cron/master_to_gcs.php > /dev/null 2>&1

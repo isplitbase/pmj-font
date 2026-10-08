@@ -21,3 +21,12 @@ zaiTask (test1: 54.64.240.94) の画面まわりのソースのうち、
 | ikisaki_tool/ikisaki_itask_tool.do | .do の振り分け |
 | ikisaki_tool/ikisaki_itask_tool/itask_image_hosei.do | 画像補正 (door → pmj-hosei-imges) |
 | ikisaki_tool/ikisaki_itask_tool/itask_aitext_analyze.do | 再分析 (door → pmj-aitext-1) |
+
+## _server/ (Web ルートの外に置くもの)
+
+`_server/` の下は、サーバのルート(`/`)からの相対パス。
+
+| ファイル | 内容 |
+|---|---|
+| _server/data/pmj_cron/master_to_gcs.php | マスタ(pys/v2ac_kanjo_master.json)を door → pmj-simpletool(-real) 経由で GCS (pmjbase/, pmjbase/real/) へ転送 |
+| _server/etc/cron.d/pmj_master_gcs | 上を10分ごとに ec2-user で実行 |
