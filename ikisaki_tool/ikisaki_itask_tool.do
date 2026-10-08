@@ -167,6 +167,8 @@ try{
 		itask_image_hosei();
 	}else if($action == "itask_aitext_analyze"){
 		itask_aitext_analyze();
+	}else if($action == "itask_ana_request"){
+		itask_ana_request();
 	}else if($action == "keieidangi_download_excel"){
 		keieidangi_download_excel();
 	}else if($action == "keieidangi_get_prompt"){		keieidangi_get_prompt();	}else if($action == "keieidangi_save_prompt"){		keieidangi_save_prompt();	}

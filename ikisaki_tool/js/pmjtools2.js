@@ -1255,3 +1255,46 @@ CS.pmjtools2_rowdnd_init = function () {
 	});
 };
 CS.pmjtools2_rowdnd_init();
+
+//===============================================================
+// 一覧の「強力分析」: チェックした案件を強力分析(ana 方式)のキューに登録する
+//   選択削除(itask_tool.js CS.itask_list_delete_all)と同じく、各行のチェック(delete_flag)を使う。
+//   登録した案件は「分析中」になり、cron の batch/ikisaki_itask_make_ana.do が順に分析する。
+//   成功: 状態=完了、精査ステータス=精査待 / 失敗: 状態=要確認。結果は一覧の再読み込みで確認する。
+//===============================================================
+CS.itask_list_ana_all = function () {
+	var v = CS.vueObj;
+	var ids = [];
+	for (var i = 0; i < v.itask_list_show_file_list_now.length; i++) {
+		if (v.itask_list_show_file_list_now[i].delete_flag) {
+			ids.push(v.itask_list_show_file_list_now[i]["itask_id"]);
+		}
+	}
+	if (ids.length === 0) {
+		alert("強力分析する行を選択してください");
+		return;
+	}
+	if (!window.confirm("選択した " + ids.length + " 件を強力分析します。\n今の勘定科目は分析結果で置き換わります(精査ステータスは「精査待」に戻ります)。\nよろしいですか？")) {
+		return;
+	}
+	$.ajax({
+		type: "POST",
+		url: CS.ITASK_TOOL_URL,
+		data: { action: "itask_ana_request", itask_id_list: ids.join(",") },
+		dataType: "json",
+		cache: false
+	}).fail(function () { CS.alert_error(null); }).done(function (data) {
+		if (data["status"] != "OK") {
+			CS.alert_error(data["message"]);
+			return;
+		}
+		var msg = data["added"] + " 件を強力分析に登録しました。";
+		if (data["skipped_busy"] > 0) { msg += "\n(" + data["skipped_busy"] + " 件はすでに分析中のため登録していません)"; }
+		msg += "\n終わったら一覧を再読み込みしてください。";
+		alert(msg);
+		for (var j = 0; j < v.itask_list_show_file_list_now.length; j++) {
+			v.itask_list_show_file_list_now[j].delete_flag = false;
+		}
+		if (typeof CS.menu_itask_refresh === "function") { CS.menu_itask_refresh(); }
+	});
+};

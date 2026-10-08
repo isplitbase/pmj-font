@@ -2835,7 +2835,8 @@
       <div class="KskMWEZc">
         <div class="LpMNBYZc">
           <input class="ArwaUmWc" v-if="member_info.user_id!=16" v-model="itask_list_show_file_list_selectall_click_flag" v-on:click="itask_list_show_file_list_selectall_click" type="checkbox" style="position: unset;opacity: unset;pointer-events: auto;" />
-          <span title="削除" v-if="member_info.user_id!=16" v-on:click="itask_list_delete_all" class="badge badge-danger like_btn" style=""><i class="far fa-trash-alt"></i>選択削除</span></div>
+          <span title="削除" v-if="member_info.user_id!=16" v-on:click="itask_list_delete_all" class="badge badge-danger like_btn" style=""><i class="far fa-trash-alt"></i>選択削除</span>
+          <span title="チェックした案件を強力分析(ana方式)で分析し直す" v-if="member_info.user_id!=16" v-on:click="itask_list_ana_all" class="badge badge-primary like_btn" style="margin-left: 8px;"><i class="fas fa-bolt"></i>強力分析</span></div>
         <div class="WcJnUtuB">総件数：{{ itask_list_show_file_itask_count }}</div>
 		<!--div class="WcJnUtuB">総件数：{{ itask_list_show_file_itask_count }} <a style="color:red" v-if="itask_list_show_file_itask_count>1200">表示件数：{{ itask_list_show_file_list_now.length }}　新しいカテゴリーを作成するようお願いいたします</a></div-->
       </div>

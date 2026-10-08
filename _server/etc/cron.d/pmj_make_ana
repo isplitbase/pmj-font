@@ -1,0 +1,5 @@
+# 強力分析(ana 方式)のキューを処理する (毎分。1回に1件。前の回が動いていれば何もしない)
+#   詳細は /var/www/html/ikisaki_tool/batch/ikisaki_itask_make_ana.do の先頭
+SHELL=/bin/bash
+PATH=/usr/local/bin:/usr/bin:/bin
+* * * * * ec2-user php /var/www/html/ikisaki_tool/batch/ikisaki_itask_make_ana.do > /dev/null 2>&1
