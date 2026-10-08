@@ -10,14 +10,14 @@
  *
  *   POST:
  *     itask_pages_str … 画面が持っている画像の base64(あればこれを使う)
- *     itask_id        … itask_pages_str が無い場合に /data/iimgs から読むため
+ *     itask_id        … itask_pages_str が無い場合に元画像を読むため(test1 はファイル、149 は DB)
  *     itask_pages_no  … 同上(画面と同じ 1 始まり)
  *     prompt          … 任意(最大300文字)。省略時は API 側の既定プロンプト
  *
  *   返り値:
  *     { "status":"OK", "image_base64":"…", "mime":"image/png", "elapsed":23.4, … }
  *
- *   ※ 元画像(/data/iimgs)は書き換えない。補正結果を返すだけ。
+ *   ※ 元画像は書き換えない。補正結果を返すだけ。
  *   ※ ID token 取得関数・定数は keieidangi_call_ai.do で定義済みのものを再利用
  *      (ディスパッチャが同フォルダの .do を全 include するため。二重定義しないこと)
  */
@@ -58,7 +58,8 @@ function itask_image_hosei(){
 	$img_b64 = preg_replace('/^data:image\/[a-zA-Z]+;base64,/', '', $img_b64);
 
 	if ($img_b64 === "") {
-		// 画面から画像が来ていない場合は /data/iimgs から読む
+		// 画面から画像が来ていない場合は元画像を読む(読み込み先は itask_aitext_analyze.do の
+		// itask_aitext_page_images を参照。test1 はファイル、149 は DB)
 		$itask_id       = isset($_POST['itask_id'])       ? (int)$_POST['itask_id']       : 0;
 		$itask_pages_no = isset($_POST['itask_pages_no']) ? (int)$_POST['itask_pages_no'] : 0;
 		if ($itask_id <= 0 || $itask_pages_no <= 0) {
@@ -67,21 +68,16 @@ function itask_image_hosei(){
 			echo json_encode($putmobj, JSON_UNESCAPED_UNICODE);
 			exit();
 		}
-		$no = $itask_pages_no - 1;        // DB 側の itask_pages_no は 0 始まり
-		$sqlstr = "SELECT fileroot FROM i_itask_v_pages_root"
-		        . " WHERE itask_id=" . $itask_id . " AND itask_pages_no=" . $no . " LIMIT 1;";
-		$rs = runsql(__FILE__, $sqlstr);
-		if (!$rs) { exit(); }
-		$fileroot = "";
-		while ($row = mysql_fetch_assoc($rs)) { $fileroot = $row["fileroot"]; }
-		if ($fileroot === "") {
+		$no = $itask_pages_no - 1;        // 画面のページ番号は 1 始まり
+		$orig_pages = itask_aitext_page_images($itask_id);
+		if ($orig_pages === false || !isset($orig_pages[$no])) {
 			$putmobj["status"] = "NG";
 			$putmobj["error"]  = "該当ページの画像が見つかりません。";
 			echo json_encode($putmobj, JSON_UNESCAPED_UNICODE);
 			mysql_close($link);
 			exit();
 		}
-		$raw = @file_get_contents("/data/iimgs/" . $fileroot);
+		$raw = itask_aitext_page_raw($orig_pages[$no]);
 		if ($raw === false || $raw === "") {
 			$putmobj["status"] = "NG";
 			$putmobj["error"]  = "画像ファイルを読めませんでした。";

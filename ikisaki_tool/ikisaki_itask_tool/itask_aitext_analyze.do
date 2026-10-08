@@ -18,7 +18,7 @@
  *     pages      … JSON 文字列。ページ順に
  *                    [{"no":3,"source":"orig"}, {"no":4,"source":"hosei","image":"<base64>"}, ...]
  *                  no は画面と同じ 1 始まり。
- *                  orig  … /data/iimgs の画像をそのまま使う
+ *                  orig  … 元画像をそのまま使う(読み込み先は itask_aitext_page_images を参照)
  *                  hosei … 画面から受け取った補正後の画像を、元画像と同じ大きさに拡大して使う
  *     document_judgment_flag … houjin(既定) / kojin
  *
@@ -66,14 +66,10 @@ function itask_aitext_analyze(){
 	}
 
 	//------------------------------------------------------------
-	// 1. 元画像の場所(ページ番号 → ファイル)
+	// 1. 元画像(画面のページ順。0 始まり)
 	//------------------------------------------------------------
-	$fileroot_map = array();
-	$rs = runsql(__FILE__, "SELECT itask_pages_no, fileroot FROM i_itask_v_pages_root WHERE itask_id=" . $itask_id . ";");
-	if (!$rs) { itask_aitext_ng("ページ情報を取得できませんでした。"); }
-	while ($row = mysql_fetch_assoc($rs)) {
-		$fileroot_map[intval($row["itask_pages_no"])] = $row["fileroot"];
-	}
+	$orig_pages = itask_aitext_page_images($itask_id);
+	if ($orig_pages === false) { itask_aitext_ng("ページ情報を取得できませんでした。"); }
 
 	//------------------------------------------------------------
 	// 2. 分析に送る画像を揃える
@@ -85,24 +81,24 @@ function itask_aitext_analyze(){
 	foreach ($pages as $p) {
 		$no = isset($p["no"]) ? intval($p["no"]) : 0;
 		$idx = $no - 1;
-		if ($idx < 0 || !isset($fileroot_map[$idx])) {
+		if ($idx < 0 || !isset($orig_pages[$idx])) {
 			itask_aitext_ng($no . " ページの画像が見つかりません。");
 		}
-		$orig_path = "/data/iimgs/" . $fileroot_map[$idx];
+		$raw = itask_aitext_page_raw($orig_pages[$idx]);
+		if ($raw === false || $raw === "") { itask_aitext_ng($no . " ページの画像を読めませんでした。"); }
 		$source = (isset($p["source"]) && $p["source"] === "hosei") ? "hosei" : "orig";
 		if ($source === "hosei") {
 			$b64 = isset($p["image"]) ? preg_replace('/^data:image\/[a-zA-Z]+;base64,/', '', trim((string)$p["image"])) : "";
 			if ($b64 === "") { itask_aitext_ng($no . " ページの補正後画像がありません。"); }
-			$size = @getimagesize($orig_path);
+			$size = @getimagesizefromstring($raw);
 			$images[] = $b64;
 			// 補正後画像は 1024x1536 程度なので、元画像の大きさに戻してから分析する
 			$resize_to[] = ($size !== false) ? array(intval($size[0]), intval($size[1])) : null;
 		} else {
-			$raw = @file_get_contents($orig_path);
-			if ($raw === false || $raw === "") { itask_aitext_ng($no . " ページの画像を読めませんでした。"); }
 			$images[] = base64_encode($raw);
 			$resize_to[] = null;
 		}
+		unset($raw);
 		$page_nos[] = $idx;
 		// 確認用: 実際に分析に使う画像の大きさと指紋(CRC32)を画面に返す
 		$last = $images[count($images) - 1];
@@ -250,5 +246,62 @@ function itask_aitext_ng($message, $extra = array()){
 	echo json_encode($putmobj, JSON_UNESCAPED_UNICODE);
 	if ($link) { mysql_close($link); }
 	exit();
+}
+
+//------------------------------------------------------------
+// 元画像の一覧(画面のページ順。0 始まり)
+//   サーバによって編集画面の画像の持ち方が違うので、その画面と同じ読み方をする。
+//     test1 : i_itask_v_pages_root の fileroot → /data/iimgs/ のファイル
+//     149   : v_itask_v_pages の itask_pages_id → i_itask_v_pages.itask_pages_str (base64)
+//   i_itask_v_pages_root が無い・行が無い・ファイルが読めない場合は 149 の読み方にする。
+//   返り値: [ ["file" => パス] または ["b64" => base64], ... ]   失敗時 false
+//   ※ 画像補正の .do(itask_image_hosei.do)からも使う
+//------------------------------------------------------------
+if (!function_exists('itask_aitext_page_images')) {
+	function itask_aitext_page_images($itask_id){
+		$itask_id = intval($itask_id);
+		$list = array();
+
+		// test1 の読み方(テーブルがあるときだけ。無いテーブルを SELECT するとエラーになるため先に確認)
+		$rs = runsql(__FILE__, "SHOW TABLES LIKE 'i_itask_v_pages_root';");
+		if ($rs && mysql_fetch_assoc($rs)) {
+			$rs = runsql(__FILE__, "SELECT fileroot FROM i_itask_v_pages_root WHERE itask_id=" . $itask_id
+				. " ORDER BY itask_pages_no, itask_pages_id;");
+			if (!$rs) { return false; }
+			$ok = true;
+			while ($row = mysql_fetch_assoc($rs)) {
+				$path = "/data/iimgs/" . $row["fileroot"];
+				if (!is_file($path)) { $ok = false; }
+				$list[] = array("file" => $path);
+			}
+			if ($ok && count($list) > 0) { return $list; }
+			$list = array();
+		}
+
+		// 149 の読み方(149 の itask_list_show_edit_window.do と同じ)
+		$rs = runsql(__FILE__, "SELECT itask_pages_id FROM v_itask_v_pages WHERE itask_id=" . $itask_id . ";");
+		if (!$rs) { return false; }
+		$ids = array();
+		while ($row = mysql_fetch_assoc($rs)) { $ids[] = intval($row["itask_pages_id"]); }
+		if (count($ids) == 0) { return $list; }
+		$rs = runsql(__FILE__, "SELECT itask_pages_str FROM i_itask_v_pages WHERE itask_pages_id IN (" . implode(",", $ids) . ")"
+			. " ORDER BY itask_pages_no, itask_pages_id;");
+		if (!$rs) { return false; }
+		while ($row = mysql_fetch_assoc($rs)) {
+			$list[] = array("b64" => $row["itask_pages_str"]);
+		}
+		return $list;
+	}
+}
+// 上の一覧の1件から画像の中身(バイナリ)を取り出す。失敗時 false
+if (!function_exists('itask_aitext_page_raw')) {
+	function itask_aitext_page_raw($page){
+		if (isset($page["file"])) { return @file_get_contents($page["file"]); }
+		if (isset($page["b64"]))  {
+			$b64 = preg_replace('/^data:image\/[a-zA-Z]+;base64,/', '', trim((string)$page["b64"]));
+			return base64_decode($b64);
+		}
+		return false;
+	}
 }
 ?>
