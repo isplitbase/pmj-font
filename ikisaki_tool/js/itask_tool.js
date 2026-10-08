@@ -17010,6 +17010,7 @@ CS.kanjo_detail_up = function(index) {
 	CS.itask_list_show_edit_pana_resort_kanjo_detail();
 }
 CS.kanjo_detail_down = function(index) {
+	var sindex=null;	// 宣言漏れ(前回の値が残る・初回はエラー)のため追加
 	if(index<CS.vueObj.kanjo_detail.length-1){
 		for(var i=0;i<CS.vueObj.kanjo_detail.length;i++){
 			var doflag=false;

@@ -1059,3 +1059,199 @@ CS.pmjtools2_viewer_init = function () {
 	fitHeight();
 };
 CS.pmjtools2_viewer_init();
+
+//===============================================================
+// 親画面(zaiTask編集)左の「項目の編集」パネル(法人)の行を、マウスで上下に移動する
+//   ・各行の「移動」列(▲▼)の右につかむ印(fa-grip-vertical)を付け、それをつかんで落とした位置へ行を移す
+//   ・既存の HTML・JS には手を入れず、ここで document にイベントを足すだけ(画像ビューと同じやり方)
+//   ・並びは CS.vueObj.kanjo_detail の順番そのもの。移したあとは ▲▼ と同じく
+//     CS.itask_list_show_edit_pana_resort_kanjo_detail() で分類セルの結合と検算をやり直す
+//   ・DB への反映は ▲▼ と同じく「保存」時(サーバが配列の順番で sort を振る)
+//   ・分類をまたいだ移動は ▲▼ と同じく許す
+//===============================================================
+CS.pmjtools2_rowdnd_init = function () {
+	if (CS.pmjtools2_rowdnd_inited) { return; }
+	CS.pmjtools2_rowdnd_inited = true;
+
+	var TBODY = 'div.HdJuNQCi[text="法人の場合"] tbody.AhxDWewm';
+	var drag = null;          // { item, fromK, tbody }
+	var dropPos = -1;         // 落とす位置(表示中の行の何番目の前か。行数と同じなら最後)
+	var line = null;          // 落とす位置を示す線
+
+	// 見た目
+	var st = document.createElement("style");
+	st.textContent =
+		".pt2-grip{flex:0 0 10px;width:10px;cursor:grab;color:#999;font-size:11px;text-align:center;padding-right:2px;user-select:none;line-height:1;}" +
+		".pt2-grip:hover{color:rgb(66,133,244);}" +
+		".pt2-dropline{position:fixed;height:3px;background:rgb(66,133,244);z-index:99999;pointer-events:none;display:none;border-radius:2px;}" +
+		".pt2-flash{position:fixed;background:rgba(66,133,244,.25);z-index:99998;pointer-events:none;transition:opacity .6s;}";
+	document.head.appendChild(st);
+
+	function tbodyOf(el) {
+		return (el && el.closest) ? el.closest(TBODY) : null;
+	}
+	// 今のタブで表示している行が kanjo_detail の何番目か(HTML の v-if と同じ条件)
+	function visibleIndexes() {
+		var v = CS.vueObj, tab = v.itask_list_show_edit_pana_tag_button_index, list = [];
+		for (var i = 0; i < v.kanjo_detail.length; i++) {
+			var it = v.kanjo_detail[i];
+			var fam = parseInt(it.family, 10), ti = parseInt(it.tabindex, 10);
+			if ((tab == 1 && it.order == '2' && fam < 40) ||
+				(tab == 2 && it.order == '2' && fam >= 40) ||
+				(tab == 3 && it.order == '1' && ti != 4) ||
+				(tab == 4 && it.order == '1' && ti == 4)) {
+				list.push(i);
+			}
+		}
+		return list;
+	}
+	function rowsOf(tbody) {
+		var rows = [];
+		for (var i = 0; i < tbody.children.length; i++) {
+			if (tbody.children[i].tagName === "TR") { rows.push(tbody.children[i]); }
+		}
+		return rows;
+	}
+	// 行の中の勘定科目のリンク(id="itask_list_show_edit_pana_kanjyo_番号")から番号を読む
+	function indexOfRow(tr) {
+		var a = tr.querySelector('[id^="itask_list_show_edit_pana_kanjyo_"]');
+		return a ? parseInt(a.id.replace("itask_list_show_edit_pana_kanjyo_", ""), 10) : null;
+	}
+	// 移動してよい状態か
+	function enabled() {
+		var v = CS.vueObj;
+		if (!v || !v.kanjo_detail || typeof CS.itask_list_show_edit_pana_resort_kanjo_detail !== "function") { return false; }
+		if (v.itask_list_show_edit_pana_houjin_input_show) { return false; }     // 簡易入力中
+		return true;
+	}
+	// 編集中の行があると、入力欄の番号がずれるので動かさない
+	function editing() {
+		var d = CS.vueObj.kanjo_detail;
+		for (var i = 0; i < d.length; i++) {
+			if (d[i].edit0 || d[i].edit1 || d[i].candidate_select_list_showflag) { return true; }
+		}
+		return false;
+	}
+
+	// つかむ印を付ける(Vue が行を作り直すと消えるので、繰り返し確認して足す)
+	function ensureGrips() {
+		var tbodies = document.querySelectorAll(TBODY);
+		for (var b = 0; b < tbodies.length; b++) {
+			var rows = rowsOf(tbodies[b]);
+			for (var r = 0; r < rows.length; r++) {
+				var td = rows[r].lastElementChild;                  // 「移動」列
+				var box = td ? td.querySelector(".iTWRbtNa") : null;
+				if (!box || box.querySelector(".pt2-grip")) { continue; }
+				var g = document.createElement("span");
+				g.className = "pt2-grip";
+				g.innerHTML = '<i class="fas fa-grip-vertical"></i>';
+				g.title = "ドラッグで移動";
+				g.setAttribute("draggable", "true");
+				box.appendChild(g);
+			}
+		}
+	}
+
+	function showLine(tbody, rows, pos) {
+		if (!line) {
+			line = document.createElement("div");
+			line.className = "pt2-dropline";
+			document.body.appendChild(line);
+		}
+		var tb = tbody.getBoundingClientRect();
+		var y = (pos < rows.length) ? rows[pos].getBoundingClientRect().top : rows[rows.length - 1].getBoundingClientRect().bottom;
+		line.style.left = tb.left + "px";
+		line.style.width = tb.width + "px";
+		line.style.top = (y - 1) + "px";
+		line.style.display = "block";
+	}
+	function hideLine() {
+		if (line) { line.style.display = "none"; }
+	}
+	function flash(tr) {
+		var r = tr.getBoundingClientRect();
+		var f = document.createElement("div");
+		f.className = "pt2-flash";
+		f.style.left = r.left + "px"; f.style.top = r.top + "px";
+		f.style.width = r.width + "px"; f.style.height = r.height + "px";
+		document.body.appendChild(f);
+		setTimeout(function () { f.style.opacity = "0"; }, 300);
+		setTimeout(function () { if (f.parentNode) { f.parentNode.removeChild(f); } }, 1000);
+	}
+	// マウスの高さから、何番目の行の前に落とすかを決める
+	//   (大分類などのセルは複数行にまたがるので、マウスの下の要素ではなく高さで判断する)
+	function posAt(rows, y) {
+		var p = 0;
+		for (var i = 0; i < rows.length; i++) {
+			var r = rows[i].getBoundingClientRect();
+			if (y > r.top + r.height / 2) { p = i + 1; }
+		}
+		return p;
+	}
+
+	document.addEventListener("mouseover", function (e) {
+		if (tbodyOf(e.target)) { ensureGrips(); }
+	});
+	setInterval(ensureGrips, 1000);
+
+	document.addEventListener("dragstart", function (e) {
+		var g = (e.target && e.target.closest) ? e.target.closest(".pt2-grip") : null;
+		if (!g) { return; }
+		var tbody = tbodyOf(g), tr = g.closest("tr");
+		if (!tbody || !tr || !enabled() || editing()) { e.preventDefault(); return; }
+		var rows = rowsOf(tbody), vis = visibleIndexes();
+		var k = rows.indexOf(tr);
+		// 画面の行と配列の対応がずれていたら何もしない(安全のため)
+		if (k < 0 || rows.length !== vis.length || indexOfRow(tr) !== vis[k]) {
+			console.warn("[pmjtools2] 行の対応が取れないため移動しません", { k: k, rows: rows.length, vis: vis.length });
+			e.preventDefault();
+			return;
+		}
+		drag = { item: CS.vueObj.kanjo_detail[vis[k]], fromK: k, tbody: tbody };
+		dropPos = -1;
+		e.dataTransfer.effectAllowed = "move";
+		e.dataTransfer.setData("text/plain", "");                 // Firefox はこれが無いとドラッグが始まらない
+		var r = tr.getBoundingClientRect();
+		e.dataTransfer.setDragImage(tr, e.clientX - r.left, e.clientY - r.top);
+	});
+	document.addEventListener("dragover", function (e) {
+		if (!drag) { return; }
+		if (tbodyOf(e.target) !== drag.tbody) { hideLine(); dropPos = -1; return; }
+		e.preventDefault();
+		e.dataTransfer.dropEffect = "move";
+		var rows = rowsOf(drag.tbody);
+		var p = posAt(rows, e.clientY);
+		// 今の位置のすぐ上・すぐ下は動かないのと同じなので線を出さない
+		if (p === drag.fromK || p === drag.fromK + 1) { hideLine(); dropPos = -1; return; }
+		dropPos = p;
+		showLine(drag.tbody, rows, p);
+	});
+	document.addEventListener("drop", function (e) {
+		if (!drag) { return; }
+		e.preventDefault();
+		var d = drag, p = dropPos;
+		drag = null; dropPos = -1; hideLine();
+		if (p < 0) { return; }
+		var list = CS.vueObj.kanjo_detail, vis = visibleIndexes();
+		var from = list.indexOf(d.item);
+		if (from < 0 || !vis.length) { return; }
+		// 落とす先: 表示中の p 番目の行の前(最後なら最後の行の後ろ)
+		var to = (p < vis.length) ? vis[p] : vis[vis.length - 1] + 1;
+		list.splice(from, 1);
+		if (from < to) { to--; }
+		list.splice(to, 0, d.item);
+		CS.itask_list_show_edit_pana_resort_kanjo_detail();      // ▲▼ と同じ後処理
+		// 移した行を一瞬光らせる
+		CS.vueObj.$nextTick(function () {
+			var tbody = document.querySelector(TBODY);
+			if (!tbody) { return; }
+			var k = visibleIndexes().indexOf(CS.vueObj.kanjo_detail.indexOf(d.item));
+			var rows = rowsOf(tbody);
+			if (k >= 0 && rows[k]) { flash(rows[k]); }
+		});
+	});
+	document.addEventListener("dragend", function () {
+		drag = null; dropPos = -1; hideLine();
+	});
+};
+CS.pmjtools2_rowdnd_init();
