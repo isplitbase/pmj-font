@@ -3,6 +3,7 @@
  * zaiTask 一覧の「強力分析」: チェックした案件を強力分析のキュー(i_itask_queue_ana)に登録する
  *
  *   POST: itask_id_list … カンマ区切りの itask_id
+ *         use_pdf       … 1 なら元の PDF からページ画像を作って分析する(既定 0: 保存済みの画像)
  *   登録した案件は m_itask.status=1(分析中)にする。分析は cron の batch/ikisaki_itask_make_ana.do が行う
  *   (成功: m_itask.status=9 + 精査ステータス 0 / 失敗: m_itask.status=2)。
  *   すでに分析中(m_itask.status=1)・キューに入っている案件は登録しない。
@@ -21,6 +22,7 @@ function itask_ana_request(){
 		if ($v > 0) { $ids[$v] = true; }
 	}
 	$ids = array_keys($ids);
+	$use_pdf = (isset($_POST["use_pdf"]) && intval($_POST["use_pdf"]) === 1) ? 1 : 0;
 	if (count($ids) == 0) {
 		$putmobj["status"] = "NG";
 		$putmobj["message"] = "強力分析する行を選択してください";
@@ -47,8 +49,8 @@ function itask_ana_request(){
 		$queued = ($rs2 && mysql_fetch_assoc($rs2));
 		if (intval($row["status"]) === 1 || $queued) { $skipped_busy++; continue; }
 		$doc_type = (strpos((string)$row["type"], "konjin") === 0) ? "kojin" : "houjin";
-		runsql(__FILE__, "INSERT INTO i_itask_queue_ana (itask_id, status, doc_type, user_id, member_id, prev_status)"
-			. " VALUES ($itask_id, 'NM', '$doc_type', " . intval($user_id) . ", " . intval($_SESSION["member_id"]) . ", " . intval($row["status"]) . ")");
+		runsql(__FILE__, "INSERT INTO i_itask_queue_ana (itask_id, status, doc_type, use_pdf, user_id, member_id, prev_status)"
+			. " VALUES ($itask_id, 'NM', '$doc_type', $use_pdf, " . intval($user_id) . ", " . intval($_SESSION["member_id"]) . ", " . intval($row["status"]) . ")");
 		runsql(__FILE__, "UPDATE m_itask SET status=1, update_at=now() WHERE itask_id=$itask_id");
 		$added++;
 	}

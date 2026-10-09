@@ -1259,6 +1259,7 @@ CS.pmjtools2_rowdnd_init();
 //===============================================================
 // 一覧の「強力分析」: チェックした案件を強力分析(ana 方式)のキューに登録する
 //   選択削除(itask_tool.js CS.itask_list_delete_all)と同じく、各行のチェック(delete_flag)を使う。
+//   「元PDFで分析」にチェックがあれば、保存済みの画像ではなく元の PDF から画像を作って分析する(use_pdf=1)。
 //   登録した案件は「分析中」になり、cron の batch/ikisaki_itask_make_ana.do が順に分析する。
 //   成功: 状態=完了、精査ステータス=精査待 / 失敗: 状態=要確認。結果は一覧の再読み込みで確認する。
 //===============================================================
@@ -1274,13 +1275,14 @@ CS.itask_list_ana_all = function () {
 		alert("強力分析する行を選択してください");
 		return;
 	}
-	if (!window.confirm("選択した " + ids.length + " 件を強力分析します。\n今の勘定科目は分析結果で置き換わります(精査ステータスは「精査待」に戻ります)。\nよろしいですか？")) {
+	var usePdf = v.itask_list_ana_use_pdf ? 1 : 0;
+	if (!window.confirm("選択した " + ids.length + " 件を強力分析します" + (usePdf ? "(元のPDFから画像を作って分析)" : "") + "。\n今の勘定科目は分析結果で置き換わります(精査ステータスは「精査待」に戻ります。置き換え前の勘定科目は保存しておきます)。\nよろしいですか？")) {
 		return;
 	}
 	$.ajax({
 		type: "POST",
 		url: CS.ITASK_TOOL_URL,
-		data: { action: "itask_ana_request", itask_id_list: ids.join(",") },
+		data: { action: "itask_ana_request", itask_id_list: ids.join(","), use_pdf: usePdf },
 		dataType: "json",
 		cache: false
 	}).fail(function () { CS.alert_error(null); }).done(function (data) {

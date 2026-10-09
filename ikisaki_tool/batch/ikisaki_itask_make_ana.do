@@ -1002,7 +1002,9 @@ function ana_build_kanjo($jsoncode, $itask_id){
 //===============================================================
 $ANA_LOG  = "/data/pmj_cron/ikisaki_itask_make_ana.log";
 $ANA_LOCK = "/data/pmj_cron/ikisaki_itask_make_ana.lock";
+$ANA_TMP  = "/data/pmj_cron/tmp";       // 元 PDF の作業場所(Web 公開領域の外)
 $ANA_STALE_MIN = 70;          // これより長く「処理中」のままなら失敗にする(door/pmj-ana の上限 3600 秒 + 余裕)
+$ANA_MAX_SEND_BYTES = 18 * 1024 * 1024;   // 元 PDF の画像の合計がこれを超えたら縮小する(door の上限 32MB に対して余裕を持たせる)
 
 function ana_log($msg){
 	global $ANA_LOG;
@@ -1042,6 +1044,92 @@ function ana_call($payload){
 	return $j;
 }
 
+//---------------------------------------------------------------
+// 元の PDF からページ画像(JPEG)を作る
+//   編集画面の「元画像」(itask_list_show_edit_window_getfullimage.do 108-245。test1/149 とも同じ)の写し:
+//   ファイルは2台のサーバ(FTP)に分割・zip で保存されている → 両方取得 → 展開 → 結合 → pdftoppm
+//   返り値: JPEG のバイナリの配列(ページ順)。失敗時は例外
+//---------------------------------------------------------------
+function ana_pdf_pages($itask_id, $user_id){
+	global $link, $ANA_TMP, $ANA_MAX_SEND_BYTES;
+	$rs = runsql(__FILE__, "SELECT file_tree_id FROM v_itask_file_info_pana WHERE itask_id=".intval($itask_id));
+	$getid = "";
+	while ($rs && ($row = mysql_fetch_assoc($rs))) { $getid = $row["file_tree_id"]; }
+	if ($getid === "" || $getid === null) { throw new Exception("元ファイルの情報(file_tree_id)がありません"); }
+
+	$rs = runsql(__FILE__, "SELECT * FROM db_server_master WHERE user_id=".intval($user_id));
+	$instance_name = ""; $pass = ""; $ftp_ip = array(); $ftp_user = array(); $ftp_pass = array();
+	while ($rs && ($row = mysql_fetch_assoc($rs))) {
+		$instance_name = $row["instance_name"];
+		$pass = $row["pass"];
+		$ftp_ip = explode(",", $row["ftp_ip"]);
+		$ftp_user = explode(",", $row["ftp_user"]);
+		$ftp_pass = explode(",", $row["ftp_pass"]);
+	}
+	if ($instance_name === "") { throw new Exception("元ファイルの保存先サーバの情報がありません"); }
+	$inst = explode(",", $instance_name);
+	$link1 = mysql_connect($inst[0], "db1admin", $pass);
+	$link2 = mysql_connect($inst[1], "db2admin", $pass);
+	if (!$link1 || !$link2) { throw new Exception("元ファイルの DB に接続できません"); }
+	mysql_select_db("db1", $link1); mysql_select_db("db2", $link2);
+	mysql_set_charset('utf8', $link1); mysql_set_charset('utf8', $link2);
+
+	$file_id = "";
+	$r1 = mysql_query("SELECT * FROM db1.files_tbl WHERE tree_id=".intval($getid)." AND new_flag=1;", $link1);
+	while ($r1 && ($row = mysql_fetch_assoc($r1))) { $file_id = $row["id"]; }
+	if ($file_id === "") { throw new Exception("元ファイルがありません"); }
+	$path1 = ""; $path2 = "";
+	$r1 = mysql_query("SELECT * FROM db1.files_tbl WHERE id=".intval($file_id).";", $link1);
+	while ($r1 && ($row = mysql_fetch_assoc($r1))) { $path1 = $row["data"]; }
+	$r2 = mysql_query("SELECT * FROM db2.files_tbl WHERE id=".intval($file_id).";", $link2);
+	while ($r2 && ($row = mysql_fetch_assoc($r2))) { $path2 = $row["data"]; }
+	if ($path1 === "" || $path2 === "") { throw new Exception("元ファイルの保存場所がありません"); }
+
+	$work = $ANA_TMP."/".$itask_id."_".str_replace(".", "", microtime(true))."/";
+	@mkdir($work, 0700, true);
+	try {
+		$lp1 = basename($path1); $lp2 = basename($path2);
+		foreach (array(array($ftp_ip[0], $ftp_user[0], $ftp_pass[0], $path1, $lp1), array($ftp_ip[1], $ftp_user[1], $ftp_pass[1], $path2, $lp2)) as $k => $f) {
+			$conn = @ftp_connect($f[0]);
+			if (!$conn || !@ftp_login($conn, $f[1], $f[2])) { throw new Exception("元ファイルのサーバ".($k+1)."に接続できません"); }
+			ftp_pasv($conn, true);
+			$ok = @ftp_get($conn, $work.$f[4], $f[3], FTP_BINARY);
+			ftp_close($conn);
+			if (!$ok) { throw new Exception("元ファイルの取得に失敗しました(".($k+1).")"); }
+		}
+		exec("unzip -o ".escapeshellarg($work.$lp1)." -d ".escapeshellarg($work)." 2>&1", $o1, $rc1);
+		exec("unzip -o ".escapeshellarg($work.$lp2)." -d ".escapeshellarg($work)." 2>&1", $o2, $rc2);
+		$pdf = $work."orig.pdf";
+		exec("cat ".escapeshellarg($work."var/www/tmp/".$lp1)." ".escapeshellarg($work."var/www/tmp/".$lp2)." > ".escapeshellarg($pdf));
+		if (!is_file($pdf) || filesize($pdf) < 100) { throw new Exception("元ファイル(PDF)を組み立てられませんでした"); }
+		exec("/usr/bin/pdftoppm -jpeg -scale-to 4677 -r 400 ".escapeshellarg($pdf)." ".escapeshellarg($work."page")." 2>&1", $o3, $rc3);
+		$files = glob($work."page-*.jpg");
+		// page-1.jpg, page-2.jpg ... page-10.jpg を数字の順に並べる
+		usort($files, function($a, $b){ return intval(preg_replace('/\D/', '', basename($a))) - intval(preg_replace('/\D/', '', basename($b))); });
+		if (count($files) == 0) { throw new Exception("元ファイル(PDF)を画像にできませんでした"); }
+		$total = 0;
+		foreach ($files as $p) { $total += filesize($p); }
+		$pages = array();
+		foreach ($files as $p) {
+			if ($total > $ANA_MAX_SEND_BYTES && function_exists("imagecreatefromjpeg")) {
+				// 大きすぎるときは長辺 3508px(A4 300dpi 相当)・画質 80 に縮小(pdftoppm が古く画質を指定できないため GD で)
+				$im = @imagecreatefromjpeg($p);
+				if ($im) {
+					$w = imagesx($im); $h = imagesy($im); $s = min(1.0, 3508 / max($w, $h));
+					$dst = imagecreatetruecolor(max(1, intval($w * $s)), max(1, intval($h * $s)));
+					imagecopyresampled($dst, $im, 0, 0, 0, 0, imagesx($dst), imagesy($dst), $w, $h);
+					imagejpeg($dst, $p, 80);
+					imagedestroy($im); imagedestroy($dst);
+				}
+			}
+			$pages[] = file_get_contents($p);
+		}
+		return $pages;
+	} finally {
+		exec("rm -rf ".escapeshellarg(rtrim($work, "/")));
+	}
+}
+
 if (PHP_SAPI !== "cli") { exit(); }                 // cron からだけ動かす(Web から呼ばれても何もしない)
 date_default_timezone_set("Asia/Tokyo");               // CLI の php は UTC のため(ログの時刻を日本時間に)
 @mkdir(dirname($ANA_LOG), 0775, true);
@@ -1063,8 +1151,10 @@ if (!$q) { exit(); }
 $qid = intval($q["id"]);
 $itask_id = intval($q["itask_id"]);
 $doc_type = ($q["doc_type"] === "kojin") ? "kojin" : "houjin";
+$use_pdf = (isset($q["use_pdf"]) && intval($q["use_pdf"]) === 1);
+$notes = array();               // 成功時にキューへ残すメモ
 runsql(__FILE__, "UPDATE i_itask_queue_ana SET status='MN', start_at=NOW() WHERE id=$qid AND status='NM'");
-ana_log("START itask=$itask_id queue=$qid doc_type=$doc_type door=".AITEXT_DOOR_URL);
+ana_log("START itask=$itask_id queue=$qid doc_type=$doc_type use_pdf=".($use_pdf ? 1 : 0)." door=".AITEXT_DOOR_URL);
 
 try {
 	// 案件の情報
@@ -1074,16 +1164,36 @@ try {
 	$user_id = intval($mi["user_id"]);
 	$type = $mi["type"];
 
-	// ページ画像(test1 はファイル、149 は DB。itask_aitext_analyze.do と同じ読み方)
+	// ページ画像(保存済み: test1 はファイル、149 は DB。itask_aitext_analyze.do と同じ読み方)
 	$pages = itask_aitext_page_images($itask_id);
-	if ($pages === false || count($pages) == 0) { throw new Exception("ページ画像がありません"); }
-	$images = array();
-	foreach ($pages as $p) {
-		$raw = itask_aitext_page_raw($p);
-		if ($raw === false || $raw === "") { throw new Exception("ページ画像を読めませんでした"); }
-		$images[] = base64_encode($raw);
-		unset($raw);
+	if ($pages === false) { $pages = array(); }
+	$raws = array();
+	if ($use_pdf) {
+		// 元の PDF から作る。取れなければ保存済みの画像で分析し、その旨を残す
+		try {
+			$raws = ana_pdf_pages($itask_id, $user_id);
+			ana_log("元PDF itask=$itask_id pages=".count($raws)."(保存済みの画像 ".count($pages)." ページ)");
+			if (count($pages) > 0 && count($raws) != count($pages)) {
+				$notes[] = "元PDFのページ数(".count($raws).")と保存済みの画像のページ数(".count($pages).")が違います";
+			}
+		} catch (Exception $e) {
+			$raws = array();
+			$notes[] = "元PDFを使えなかったため保存済みの画像で分析しました: ".$e->getMessage();
+			ana_log("元PDF NG itask=$itask_id ".$e->getMessage());
+		}
 	}
+	if (count($raws) == 0) {
+		if (count($pages) == 0) { throw new Exception("ページ画像がありません"); }
+		foreach ($pages as $p) {
+			$raw = itask_aitext_page_raw($p);
+			if ($raw === false || $raw === "") { throw new Exception("ページ画像を読めませんでした"); }
+			$raws[] = $raw;
+		}
+	}
+	$images = array();
+	foreach ($raws as $raw) { $images[] = base64_encode($raw); }
+	$page_count = count($images);
+	unset($raws);
 
 	// pmj-ana で分析
 	$t1 = microtime(true);
@@ -1099,11 +1209,29 @@ try {
 	$member_id = "NULL";
 	while ($rs && ($row = mysql_fetch_assoc($rs))) { $member_id = intval($row["member_id"]); }
 	runsql(__FILE__, "INSERT INTO i_analysis_history (TYPE, itask_id, user_id, member_id, isplit_api, isplit_method, call_api, unit)"
-		." VALUES ('".ana_esc($type)."', $itask_id, $user_id, $member_id, 'B', 'make_ana', 'pmj-ana', ".count($pages).")");
+		." VALUES ('".ana_esc($type)."', $itask_id, $user_id, $member_id, 'B', 'make_ana', 'pmj-ana', $page_count)");
 	runsql(__FILE__, "UPDATE m_itask SET itask_format_id=-1, update_at=now() WHERE itask_id=$itask_id");
 
-	// 勘定科目を置き換える(make.do の後処理の写し。トランザクションでまとめる)
 	runsql(__FILE__, "START TRANSACTION");
+	// 置き換える前の勘定科目を退避(元に戻すときは batch/ikisaki_itask_make_ana_restore.do)
+	$cols = array();
+	$rs = runsql(__FILE__, "SHOW COLUMNS FROM i_kanjo_info");
+	while ($rs && ($row = mysql_fetch_assoc($rs))) { $cols[] = "`".$row["Field"]."`"; }
+	$col_list = implode(",", $cols);
+	$rs = runsql(__FILE__, "INSERT INTO i_kanjo_info_ana_bk (bk_queue_id, bk_at, $col_list) SELECT $qid, NOW(), $col_list FROM i_kanjo_info WHERE aitask_id=$itask_id");
+	if (!$rs) {
+		runsql(__FILE__, "ROLLBACK");
+		throw new Exception("置き換え前の勘定科目の退避に失敗しました: ".mysqli_error($link));
+	}
+	$backup_rows = mysqli_affected_rows($link);
+	// 精査ステータス・決算日・集計列(o0〜o31)も退避(キューの prev_top_info に JSON で)
+	$o_cols = array();
+	for ($oi = 0; $oi <= 31; $oi++) { $o_cols[] = "o".$oi; }
+	$rs = runsql(__FILE__, "SELECT status, closing_date_date, ".implode(",", $o_cols)." FROM i_aitask_top_info WHERE itask_id=$itask_id");
+	$prev_top = ($rs ? mysql_fetch_assoc($rs) : null);
+	runsql(__FILE__, "UPDATE i_itask_queue_ana SET backup_rows=$backup_rows, prev_top_info='".ana_esc(json_encode($prev_top, JSON_UNESCAPED_UNICODE))."' WHERE id=$qid");
+
+	// 勘定科目を置き換える(make.do の後処理の写し)
 	$out = ana_build_kanjo($jsoncode, $itask_id);
 	if (!empty($out["insert_error"])) {
 		runsql(__FILE__, "ROLLBACK");
@@ -1120,11 +1248,13 @@ try {
 	runsql(__FILE__, "COMMIT");
 
 	// 成功: m_itask.status=9(完了)、キュー OK
+	if ($out["bad"] === "bad") { $notes[] = "一部のタブ(資産/負債純資産/損益)の項目が見つかりませんでした"; }
 	runsql(__FILE__, "UPDATE m_itask SET status=9, update_at=now() WHERE itask_id=$itask_id");
 	runsql(__FILE__, "UPDATE i_itask_queue_ana SET status='OK', end_at=NOW(), error_message=".
-		($out["bad"] === "bad" ? "'一部のタブ(資産/負債純資産/損益)の項目が見つかりませんでした'" : "NULL")." WHERE id=$qid");
-	ana_log("OK itask=$itask_id queue=$qid rows=".$out["rows"]." bad=".$out["bad"]." ".round(microtime(true)-$time_start,1)."s");
+		(count($notes) ? "'".ana_esc(mb_substr(implode(" / ", $notes), 0, 1000))."'" : "NULL")." WHERE id=$qid");
+	ana_log("OK itask=$itask_id queue=$qid rows=".$out["rows"]." backup=$backup_rows bad=".$out["bad"]." ".round(microtime(true)-$time_start,1)."s ".implode(" / ", $notes));
 } catch (Exception $e) {
+	runsql(__FILE__, "ROLLBACK");      // 途中まで書いたものは戻す(トランザクション外なら何もしない)
 	ana_fail($qid, $itask_id, $e->getMessage());
 }
 mysql_close($link);

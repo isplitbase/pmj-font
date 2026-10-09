@@ -1475,6 +1475,7 @@ CS.after_loads = function () {
 	vueUseObj.methods.itask_list_show_edit_window_show_tool= CS.itask_list_show_edit_window_show_tool;
 	vueUseObj.methods.itask_list_show_edit_window_openai_image= CS.itask_list_show_edit_window_openai_image;
 	vueUseObj.methods.itask_list_ana_all= CS.itask_list_ana_all;
+	vueUseObj.data.itask_list_ana_use_pdf=false;
 	vueUseObj.methods.itask_list_show_edit_window_map_add_rect= CS.itask_list_show_edit_window_map_add_rect;
 	vueUseObj.methods.itask_list_show_edit_window_change_goukei_checkbox= CS.itask_list_show_edit_window_change_goukei_checkbox;
 	vueUseObj.methods.itask_list_show_edit_window_change_kaijyo_checkbox= CS.itask_list_show_edit_window_change_kaijyo_checkbox;
