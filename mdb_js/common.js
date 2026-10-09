@@ -4,7 +4,10 @@
 // head[0].appendChild(script);
 //基本オブジェクト
 var CS = new Object();
-window.onunload = function(){};
+// window.onunload = function(){};
+//   ↑ ブラウザの「戻る」でキャッシュ(bfcache)から復元させないための書き方だが、今の Chrome では unload が
+//     使えず「Permissions policy violation: unload is not allowed」と出るため、同じ目的を pageshow で行う(2026-10-09)
+window.addEventListener("pageshow", function (e) { if (e.persisted) { location.reload(); } });
 history.forward();
 window.onresize = function(e){
 	if(typeof CS.kaburudiv != "undefined" && CS.kaburudiv.style.display!="none"){
