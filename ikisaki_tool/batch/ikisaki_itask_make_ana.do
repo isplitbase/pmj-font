@@ -1130,6 +1130,41 @@ function ana_pdf_pages($itask_id, $user_id){
 	}
 }
 
+//---------------------------------------------------------------
+// 決算日を決める(ana の読み取り結果を、ファイル名の決算年月で確かめる)
+//   ファイル名の年月はアップロード時(itask_upload.do 612-628)と同じ取り方:
+//   「-」で区切った2つ目の、拡張子より前の先頭6文字(例 12021004-202408柳沢….pdf → 202408)。4〜5文字なら年だけ。
+//   ・年月が ana の日付と同じ → ana の日付
+//   ・違う / ana が読めない → ファイル名の年月の月末(年だけならその年の 12/31。make.do と同じ扱い)
+//   決算日は通常は月末で、AI が期首(自 ○年○月1日)を答えることがあるため(2026-10-09)。
+//   返り値: 'YYYY-MM-DD'(決められなければ '')。補正したときは $notes に理由を足す
+//---------------------------------------------------------------
+function ana_closing_date($itask_id, $ana_date, &$notes){
+	$ana = "";
+	if (preg_match('#^(\d{4})/(\d{2})/(\d{2})$#', (string)$ana_date, $m) && checkdate(intval($m[2]), intval($m[3]), intval($m[1]))) {
+		$ana = $m[1]."-".$m[2]."-".$m[3];
+	}
+	$rs = runsql(__FILE__, "SELECT file_tree_name FROM v_itask_file_info WHERE itask_id=".intval($itask_id)." LIMIT 1");
+	$name = ($rs && ($row = mysql_fetch_assoc($rs))) ? (string)$row["file_tree_name"] : "";
+	$parts = explode("-", $name);
+	$seg = isset($parts[1]) ? explode(".", $parts[1]) : array("");
+	$ym = mb_substr($seg[0], 0, 6);
+	$y  = mb_substr($seg[0], 0, 4);
+	if (preg_match('/^\d{6}$/', $ym) && intval(substr($ym, 4, 2)) >= 1 && intval(substr($ym, 4, 2)) <= 12) {
+		if ($ana !== "" && substr(str_replace("-", "", $ana), 0, 6) === $ym) { return $ana; }
+		$fix = date("Y-m-t", strtotime(substr($ym, 0, 4)."-".substr($ym, 4, 2)."-01"));
+		$notes[] = "決算日をファイル名の年月で補正しました(読み取り ".($ana !== "" ? $ana : "なし")." → $fix)";
+		return $fix;
+	}
+	if (preg_match('/^\d{4}$/', $y)) {
+		if ($ana !== "" && substr($ana, 0, 4) === $y) { return $ana; }
+		$fix = $y."-12-31";
+		$notes[] = "決算日をファイル名の年で補正しました(読み取り ".($ana !== "" ? $ana : "なし")." → $fix)";
+		return $fix;
+	}
+	return $ana;     // ファイル名に年月が無い: 読み取り結果をそのまま使う
+}
+
 if (PHP_SAPI !== "cli") { exit(); }                 // cron からだけ動かす(Web から呼ばれても何もしない)
 date_default_timezone_set("Asia/Tokyo");               // CLI の php は UTC のため(ログの時刻を日本時間に)
 @mkdir(dirname($ANA_LOG), 0775, true);
@@ -1237,11 +1272,12 @@ try {
 		runsql(__FILE__, "ROLLBACK");
 		throw new Exception("勘定科目の書き込みに失敗しました: ".$out["insert_error"]);
 	}
-	// 決算日(ana の読み取り結果で上書き)と精査ステータス=0(精査待)。会社コードは残す
+	// 決算日(ana の読み取り結果で上書き。ファイル名の年月で確かめる)と精査ステータス=0(精査待)。会社コードは残す
 	$set = array("status=0");
 	$date = isset($block["closing_date"]["date"]) ? $block["closing_date"]["date"] : "";
-	if (preg_match('#^(\d{4})/(\d{2})/(\d{2})$#', $date, $m)) {
-		$set[] = "closing_date_date='".$m[1]."-".$m[2]."-".$m[3]."'";
+	$closing = ana_closing_date($itask_id, $date, $notes);
+	if ($closing !== "") {
+		$set[] = "closing_date_date='".ana_esc($closing)."'";
 		$set[] = "closing_date_page=NULL, closing_date_start_x=0, closing_date_start_y=0, closing_date_end_x=0, closing_date_end_y=0";
 	}
 	runsql(__FILE__, "UPDATE i_aitask_top_info SET ".implode(", ", $set)." WHERE itask_id=$itask_id");
